@@ -10,11 +10,6 @@ type
     age: Option[int]
     active: bool
 
-  SearchChunk {.dbTable: "search_chunks".} = object
-    id {.dbPk, dbAutoInc.}: int64
-    body: string
-    embedding {.dbType: "F32_BLOB(4)", dbValueExpr: "vector32(?)".}: Vector32
-
 suite "nimb integration":
   var db: Database
   var conn: Connection
@@ -127,12 +122,15 @@ suite "nimb integration":
     check rows.len == 1
     check rows[0]["name"].getString == "Manual"
 
-  test "custom write expressions render in insert queries":
-    let chunk = SearchChunk(
-      body: "Local replicas reduce tail latency.",
-      embedding: vector32([0.91, 0.09, 0.05, 0.01])
+  test "insert expressions render in raw insert queries":
+    var q = initInsertRaw()
+    table(q, "search_chunks")
+    column(q, "body", "embedding")
+    valuesExpr(q,
+      raw("?", "Local replicas reduce tail latency."),
+      vector32Expr(vector32([0.91, 0.09, 0.05, 0.01]))
     )
-    let rendered = render(initInsert(chunk))
+    let rendered = render(q)
     check rendered.sql ==
       "INSERT INTO \"search_chunks\" (\"body\", \"embedding\") VALUES (?, vector32(?))"
     check rendered.params.len == 2

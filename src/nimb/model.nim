@@ -4,8 +4,6 @@ import nimb/db
 
 template dbTable*(name: static string) {.pragma.}
 template dbColumn*(name: static string) {.pragma.}
-template dbType*(sqlType: static string) {.pragma.}
-template dbValueExpr*(expr: static string) {.pragma.}
 template dbPk*() {.pragma.}
 template dbAutoInc*() {.pragma.}
 template dbNull*() {.pragma.}
@@ -17,7 +15,6 @@ type
     fieldName*: string
     columnName*: string
     sqlType*: string
-    valueExpr*: string
     primaryKey*: bool
     autoIncrement*: bool
     nullable*: bool
@@ -119,8 +116,6 @@ macro modelInfo*(T: typedesc): untyped =
     var primaryKey = false
     var autoIncrement = false
     var nullable = false
-    var sqlType = ""
-    var valueExpr = "?"
     var defaultExpr = ""
     var ignored = false
 
@@ -128,14 +123,6 @@ macro modelInfo*(T: typedesc): untyped =
       let columnPragma = findPragmaArg(pragmas, "dbColumn")
       if columnPragma != nil:
         columnName = columnPragma.strVal
-      let sqlTypePragma = findPragmaArg(pragmas, "dbType")
-      if sqlTypePragma != nil:
-        sqlType = sqlTypePragma.strVal
-      let valueExprPragma = findPragmaArg(pragmas, "dbValueExpr")
-      if valueExprPragma != nil:
-        valueExpr = valueExprPragma.strVal
-      when defined(nimbDebugModel):
-        echo "field=", fieldName, " sqlType=", sqlType, " valueExpr=", valueExpr
       primaryKey = findPragmaArg(pragmas, "dbPk") != nil
       autoIncrement = findPragmaArg(pragmas, "dbAutoInc") != nil
       nullable = findPragmaArg(pragmas, "dbNull") != nil
@@ -147,13 +134,9 @@ macro modelInfo*(T: typedesc): untyped =
     let unwrappedType = unwrapOption(fieldType)
     if unwrappedType != fieldType:
       nullable = true
-    if sqlType.len == 0:
-      sqlType = sqlTypeFor[unwrappedType]()
 
     let fieldNameLit = newLit(fieldName)
     let columnNameLit = newLit(columnName)
-    let sqlTypeLit = newLit(sqlType)
-    let valueExprLit = newLit(valueExpr)
     let primaryKeyLit = newLit(primaryKey)
     let autoIncrementLit = newLit(autoIncrement)
     let nullableLit = newLit(nullable)
@@ -164,8 +147,7 @@ macro modelInfo*(T: typedesc): untyped =
       FieldInfo(
         fieldName: `fieldNameLit`,
         columnName: `columnNameLit`,
-        sqlType: `sqlTypeLit`,
-        valueExpr: `valueExprLit`,
+        sqlType: sqlTypeFor[`unwrappedType`](),
         primaryKey: `primaryKeyLit`,
         autoIncrement: `autoIncrementLit`,
         nullable: `nullableLit`,

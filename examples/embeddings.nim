@@ -2,13 +2,13 @@ import nimb
 import std/[strformat, with]
 
 type
-  SupportChunk {.dbTable: "support_chunks".} = object
-    docId {.dbColumn: "doc_id".}: string
+  SupportChunk = object
+    docId: string
     product: string
     audience: string
     section: string
     body: string
-    embedding {.dbType: "F32_BLOB(4)", dbValueExpr: "vector32(?)".}: Vector32
+    embedding: Vector32
 
   RetrievalRequest = object
     product: string
@@ -110,7 +110,16 @@ let request = RetrievalRequest(
 var db = openDatabase(memoryDatabase())
 var conn = connect(db)
 
-discard exec(conn, initCreateTable[SupportChunk]())
+discard exec(conn, """
+  CREATE TABLE support_chunks (
+    doc_id TEXT NOT NULL,
+    product TEXT NOT NULL,
+    audience TEXT NOT NULL,
+    section TEXT NOT NULL,
+    body TEXT NOT NULL,
+    embedding F32_BLOB(4) NOT NULL
+  )
+""")
 
 let indexOptions = VectorIndexOptions(
   metric: vmCosine,
@@ -122,7 +131,19 @@ discard createVectorIndex(conn, "support_chunks_embedding_idx",
   "support_chunks", "embedding", indexOptions)
 
 for chunk in seeds:
-  discard insert(conn, chunk)
+  var insertChunk = initInsertRaw()
+  with insertChunk:
+    table "support_chunks"
+    column "doc_id", "product", "audience", "section", "body", "embedding"
+    valuesExpr(
+      raw("?", chunk.docId),
+      raw("?", chunk.product),
+      raw("?", chunk.audience),
+      raw("?", chunk.section),
+      raw("?", chunk.body),
+      vector32Expr(chunk.embedding)
+    )
+  discard exec(conn, insertChunk)
 
 echo "Semantic retrieval request:"
 echo &"  product={request.product}"

@@ -141,7 +141,8 @@ covers Turso/libSQL vector search with a typed helper layer on top of the same
 connection and query APIs:
 
 - typed `Vector32` values
-- `vectorColumnType(...)` for `F32_BLOB`
+- explicit `initInsertRaw()` + `valuesExpr(...)` for vector writes
+- explicit `F32_BLOB` table DDL
 - `createVectorIndex(...)` and `VectorIndexOptions`
 - `vectorTopK(...)` and `vectorDistanceCos(...)`
 - typed retrieval results mapped back into Nim objects
@@ -160,6 +161,19 @@ let request = RetrievalRequest(
   question: "How should I set up a local replica for low-latency reads?",
   embedding: vector32([0.93, 0.07, 0.04, 0.01])
 )
+
+var insertChunk = initInsertRaw()
+with insertChunk:
+  table "support_chunks"
+  column "doc_id", "product", "audience", "section", "body", "embedding"
+  valuesExpr(
+    raw("?", chunk.docId),
+    raw("?", chunk.product),
+    raw("?", chunk.audience),
+    raw("?", chunk.section),
+    raw("?", chunk.body),
+    vector32Expr(chunk.embedding)
+  )
 
 var q = initSelectRaw()
 with q:
@@ -183,11 +197,11 @@ https://docs.turso.tech/features/ai-and-embeddings
 - Model pragmas:
   `dbTable`, `dbColumn`, `dbPk`, `dbAutoInc`, `dbNull`, `dbDefault`, `dbIgnore`
 - Query constructors:
-  `initSelect[T]`, `initSelectRaw`, `initInsert`, `initUpdate`, `initDelete`,
-  `initCreateTable`, `initDropTable`
+  `initSelect[T]`, `initSelectRaw`, `initInsert`, `initInsertRaw`, `initUpdate`,
+  `initDelete`, `initCreateTable`, `initDropTable`
 - Query composition:
   `tableExpr`, `column`, `columnExpr`, `where`, `join`, `groupBy`, `having`,
-  `orderBy`, `limit`, `offset`, `returning`
+  `orderBy`, `limit`, `offset`, `returning`, `values`, `valuesExpr`
 - Typed helpers:
   `insert`, `update`, `delete`, `getByPk`, `all`, `one`, `rows`
 - Prepared statements:

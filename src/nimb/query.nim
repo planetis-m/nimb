@@ -69,6 +69,11 @@ proc initSelectRaw*(): SelectQuery =
     offsetValue: -1
   )
 
+proc initInsertRaw*(): InsertQuery =
+  InsertQuery(
+    intoClause: raw("")
+  )
+
 proc initSelect*[T](modelType: typedesc[T]): SelectQuery =
   let info = modelInfo(modelType)
   result = SelectQuery(
@@ -90,8 +95,8 @@ proc initInsert*[T](value: T): InsertQuery =
   result.columns = quotedColumnNames(fields)
   let rowValues = toDbValues(value, fields)
   var row: seq[SqlFragment]
-  for index, field in fields:
-    row.add(raw(field.valueExpr, rowValues[index]))
+  for value in rowValues:
+    row.add(raw("?", value))
   result.rows = @[row]
 
 proc initUpdate*[T](value: T): UpdateQuery =
@@ -101,8 +106,7 @@ proc initUpdate*[T](value: T): UpdateQuery =
   let updateFields = updateableFields(info)
   let updateValues = toDbValues(value, updateFields)
   for index, field in updateFields:
-    result.setClauses.add(raw(quoteIdent(field.columnName) & " = " &
-      field.valueExpr,
+    result.setClauses.add(raw(quoteIdent(field.columnName) & " = ?",
       updateValues[index]))
   let pkField = primaryKeyField(info)
   let pkValue = toDbValues(value, [pkField])[0]
@@ -223,6 +227,11 @@ proc values*(q: var InsertQuery; params: varargs[DbValue, `!?`]) =
   for value in params:
     row.add(raw("?", value))
   q.rows.add(row)
+
+proc valuesExpr*(q: var InsertQuery; fragments: varargs[SqlFragment]) =
+  if q.columns.len > 0 and fragments.len != q.columns.len:
+    raise newException(DbError, "insert values do not match insert columns")
+  q.rows.add(@fragments)
 
 proc returning*(q: var InsertQuery; expressions: varargs[string]) =
   for expression in expressions:
