@@ -36,14 +36,13 @@ proc seedSupportChunk(conn: Connection; chunk: SupportChunkSeed) =
     ) VALUES (?, ?, ?, ?, ?, vector32(?))
   """)
   try:
-    with stmt:
-      bindParam chunk.docId
-      bindParam chunk.product
-      bindParam chunk.audience
-      bindParam chunk.section
-      bindParam chunk.body
-      bindParam chunk.embedding
-    discard execute(stmt)
+    discard run(stmt,
+      chunk.docId,
+      chunk.product,
+      chunk.audience,
+      chunk.section,
+      chunk.body,
+      chunk.embedding)
   finally:
     finalize(stmt)
 
@@ -161,7 +160,6 @@ echo &"  product={request.product}"
 echo &"  audience={request.audience}"
 echo &"  question={request.question}"
 
-echo ""
 echo "Nearest support chunks:"
 for chunk in nearestChunks(conn, request, 4):
   echo &"  [{chunk.docId}/{chunk.section}] distance={chunk.distance:.4f}"

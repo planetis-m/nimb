@@ -29,7 +29,7 @@ proc quoteIdent*(name: string): string =
       result.add('.')
     result.add(quoteIdentifierPart(part))
 
-proc raw*(sql: string; params: varargs[DbValue, `%!`]): SqlFragment =
+proc raw*(sql: string; params: varargs[DbValue, `!?`]): SqlFragment =
   SqlFragment(sql: sql, params: @params)
 
 proc ident*(name: string): SqlFragment =

@@ -1,25 +1,28 @@
 # nimb
 
-`nimb` is a SQL-first Nim ORM for libSQL that keeps the SQL visible, the model
-mapping small, and the query composition procedural.
+`nimb` is a SQL-first Nim ORM for libSQL. It keeps SQL visible, model mapping
+small, and query composition procedural.
 
-It takes architectural inspiration from Bun, but the surface is adapted to
-idiomatic Nim: `std/with`, explicit query objects, explicit parameter values,
-and no fluent method chains.
+It takes architectural inspiration from Bun, but the public surface is adapted
+to Nim: `std/with`, explicit query objects, prepared statements when you want
+them, and no fluent method chains.
 
 ## Why Try It?
 
 - SQL stays in charge. You can build typed CRUD queries, drop to raw SQL, and
-  mix both in the same workflow without fighting the library.
-- Nim code stays readable. Query building works well with `std/with`, so query
-  setup reads like a short block instead of a chain of calls.
-- Model mapping is lightweight. Use pragmas for table names, columns, and keys,
-  then let `insert`, `update`, `delete`, and `getByPk` handle the routine work.
-- Parameter binding is explicit. Public vararg APIs use `%!` to turn values into
-  `DbValue`, so parameter conversion is visible at the call site.
-- libSQL-native features still fit. You can use vector search, `vector_top_k`,
-  and `libsql_vector_idx` directly without waiting for a special ORM abstraction.
-- Native dependency setup is simple in this repo. The required libSQL header and
+  mix both in the same workflow.
+- Nim code stays readable. Query composition works naturally with `std/with`
+  and small procedural blocks.
+- Model mapping stays light. Table names, columns, and keys come from pragmas,
+  not a heavy schema DSL.
+- Public vararg APIs accept normal Nim values directly. `exec`, `where`,
+  `tableExpr`, `run`, and `fetch` all call `toDbValue` through the `!?`
+  adapter internally, so you usually do not write conversions by hand.
+- Prepared statements are less noisy now. Reusable statements support
+  `bindParams`, `run`, and `fetch` instead of repeated `bindParam` calls.
+- libSQL-native features still fit. Vector search, `vector_top_k`, and
+  `libsql_vector_idx` are exposed through a small typed helper layer.
+- This repo is self-contained for local use. The required libSQL header and
   shared library are vendored under `third_party/libsql-c`.
 
 ## Install
@@ -29,10 +32,15 @@ Requirements:
 - Nim 2.3+
 - Linux `x86_64` for the currently vendored `liblibsql.so`
 
-This repository already vendors the libSQL C header and shared object, so there
-is no separate system install step for the included examples and tests.
+Package metadata is already included in [nimb.nimble](/home/ageralis/Projects/nimb/nimb.nimble).
+This repository also includes an MIT [LICENSE](/home/ageralis/Projects/nimb/LICENSE)
+under Antonis Geralis, with attribution for the MIT-licensed Nim libSQL
+binding used as a reference during implementation.
 
-For local use from the repo root:
+The libSQL C header and shared object are vendored locally, so the examples and
+tests do not depend on `../../libsql-c` or a separate system install step.
+
+From the repo root:
 
 ```bash
 nim c -r examples/basic.nim
@@ -78,12 +86,12 @@ close(db)
 ### Billing and CRUD
 
 [examples/basic.nim](/home/ageralis/Projects/nimb/examples/basic.nim) shows a
-more realistic account + invoice flow:
+more realistic account and invoice flow:
 
 - schema creation from Nim models
 - typed inserts and `getByPk`
 - object updates with `with model:`
-- transactional SQL for state changes
+- explicit transaction handling
 - revenue reporting with an ad hoc query
 
 ```nim
@@ -104,54 +112,74 @@ discard update(conn, acme)
 [examples/incidents.nim](/home/ageralis/Projects/nimb/examples/incidents.nim)
 shows how `nimb` handles read-heavy operational workflows:
 
-- prepared statement seeding
-- explicit binding with `%!`
+- reusable prepared statements
+- positional bulk binding with `run`
 - report-style joins using `initSelectRaw()`
-- typed incident update after triage
+- typed incident updates after triage
 
 ```nim
-with incidentStmt:
-  reset()
-  bindParam (%!incident[0])
-  bindParam (%!incident[1])
-  bindParam (%!incident[2])
-  bindParam (%!incident[3])
-  bindParam (%!incident[4])
-discard execute(incidentStmt)
+var incidentStmt = prepare(conn, """
+  INSERT INTO incidents (service_id, summary, severity, status, owner)
+  VALUES (?, ?, ?, ?, ?)
+""")
+try:
+  for incident in seedIncidents:
+    discard run(incidentStmt,
+      incident[0],
+      incident[1],
+      incident[2],
+      incident[3],
+      incident[4])
+finally:
+  finalize(incidentStmt)
 ```
 
 ### AI and Embeddings
 
 [examples/embeddings.nim](/home/ageralis/Projects/nimb/examples/embeddings.nim)
-covers Turso/libSQL vector search directly on top of the same connection and
-query APIs:
+covers Turso/libSQL vector search with a typed helper layer on top of the same
+connection and query APIs:
 
-- `F32_BLOB` vector column
-- `vector32(...)` inserts
-- `libsql_vector_idx(...)` index creation
-- `vector_top_k(...)` nearest-neighbor lookup
+- typed `Vector32` values
+- `vectorColumnType(...)` for `F32_BLOB`
+- `createVectorIndex(...)` and `VectorIndexOptions`
+- `vectorTopK(...)` and `vectorDistanceCos(...)`
+- typed retrieval results mapped back into Nim objects
 
 ```nim
-var nearest = initSelectRaw()
-with nearest:
-  tableExpr """
-    vector_top_k('support_chunks_idx', ?, 3) hits
-    JOIN support_chunks c ON c.rowid = hits.id
-  """, "[0.90, 0.08, 0.06, 0.01]"
+type
+  RetrievalRequest = object
+    product: string
+    audience: string
+    question: string
+    embedding: Vector32
+
+let request = RetrievalRequest(
+  product: "database",
+  audience: "developers",
+  question: "How should I set up a local replica for low-latency reads?",
+  embedding: vector32([0.93, 0.07, 0.04, 0.01])
+)
+
+var q = initSelectRaw()
+with q:
+  tableExpr vectorTopK("support_chunks_embedding_idx", request.embedding, 4, "hits")
+  join "JOIN support_chunks c ON c.rowid = hits.id"
   columnExpr "c.doc_id"
   columnExpr "c.section"
-  columnExpr "c.body"
-  columnExpr "vector_distance_cos(c.embedding, vector32('[0.90, 0.08, 0.06, 0.01]')) AS distance"
+  columnExpr alias(vectorDistanceCos("c.embedding", request.embedding), "distance")
+  where "c.product = ?", request.product
+  where "c.audience = ?", request.audience
   orderBy "distance ASC"
 ```
 
-This example matches Turso’s AI & Embeddings feature set:
+This example follows Turso’s AI and Embeddings feature set:
 https://docs.turso.tech/features/ai-and-embeddings
 
 ## API Cheat Sheet
 
 - Database lifecycle:
-  `openDatabase`, `localDatabase`, `memoryDatabase`, `connect`, `close`
+  `openDatabase`, `localDatabase`, `memoryDatabase`, `connect`, `close`, `sync`
 - Model pragmas:
   `dbTable`, `dbColumn`, `dbPk`, `dbAutoInc`, `dbNull`, `dbDefault`, `dbIgnore`
 - Query constructors:
@@ -159,14 +187,31 @@ https://docs.turso.tech/features/ai-and-embeddings
   `initCreateTable`, `initDropTable`
 - Query composition:
   `tableExpr`, `column`, `columnExpr`, `where`, `join`, `groupBy`, `having`,
-  `orderBy`, `limit`, `offset`
+  `orderBy`, `limit`, `offset`, `returning`
 - Typed helpers:
   `insert`, `update`, `delete`, `getByPk`, `all`, `one`, `rows`
-- Lower-level execution:
-  `prepare`, `bindParam`, `execute`, `query`, `beginTransaction`,
-  `commit`, `rollback`
-- Parameter conversion:
-  `%!value` or `toDbValue(value)`
+- Prepared statements:
+  `prepare`, `bindParam`, `bindParams`, `run`, `fetch`, `execute`, `query`,
+  `finalize`, `reset`
+- Transactions:
+  `beginTransaction`, `commit`, `rollback`
+- Values and conversion:
+  `DbValue`, `toDbValue`, `!?value`, `nullValue`
+- Vector support:
+  `Vector32`, `vector32`, `vectorColumnType`, `VectorIndexOptions`,
+  `createVectorIndex`, `vectorTopK`, `vectorDistanceCos`, `vectorDistanceL2`,
+  `vectorExtract`
+
+## Notes
+
+- The explicit `!?` operator exists for places where you want an obvious manual
+  conversion to `DbValue`.
+- In normal use, you usually do not need to write it. Public vararg APIs call
+  `toDbValue` for you.
+- The current scope is intentionally lean:
+  local and in-memory databases, minimal raw bindings over libSQL C, explicit
+  query builders, pragma-based model metadata, CRUD helpers, typed vector
+  helpers, and raw access to libSQL-specific SQL features.
 
 ## Run Examples and Tests
 
@@ -176,17 +221,6 @@ nim c -r examples/incidents.nim
 nim c -r examples/embeddings.nim
 nim c tests/test_nimb.nim && ./tests/test_nimb
 ```
-
-## Status
-
-Current scope is intentionally lean:
-
-- local file and in-memory databases
-- minimal raw bindings over libSQL C
-- explicit query builders
-- pragma-based model metadata
-- CRUD helpers and row mapping
-- raw access to libSQL-specific SQL features like vector search
 
 ## Inspiration
 

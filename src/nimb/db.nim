@@ -225,7 +225,14 @@ proc bindParam*[T](stmt: var Statement; value: T) =
 proc bindParam*[T](stmt: var Statement; name: string; value: T) =
   bindParam(stmt, name, toDbValue(value))
 
-proc execute*(stmt: var Statement): ExecResult =
+proc bindValues(stmt: var Statement; params: openArray[DbValue]) =
+  for value in params:
+    bindParam(stmt, value)
+
+proc bindParams*(stmt: var Statement; params: varargs[DbValue, `!?`]) =
+  bindValues(stmt, params)
+
+proc executePrepared(stmt: var Statement): ExecResult =
   let executeResult = libsqlStatementExecute(stmt.handle)
   raiseIfError(executeResult.err)
   result.rowsChanged = executeResult.rowsChanged
@@ -233,7 +240,15 @@ proc execute*(stmt: var Statement): ExecResult =
   result.lastInsertRowid = info.lastInsertRowid
   result.totalChanges = info.totalChanges
 
-proc query*(stmt: var Statement): Rows =
+proc execute*(stmt: var Statement): ExecResult =
+  result = executePrepared(stmt)
+
+proc run*(stmt: var Statement; params: varargs[DbValue, `!?`]): ExecResult =
+  reset(stmt)
+  bindValues(stmt, params)
+  result = executePrepared(stmt)
+
+proc queryPrepared(stmt: var Statement): Rows =
   result.handle = libsqlStatementQuery(stmt.handle)
   raiseIfError(result.handle.err)
   let count = int(libsqlRowsColumnCount(result.handle))
@@ -242,6 +257,14 @@ proc query*(stmt: var Statement): Rows =
     let nameSlice = libsqlRowsColumnName(result.handle, int32(index))
     result.columnNames[index] = sliceToString(nameSlice)
     libsqlSliceDeinit(nameSlice)
+
+proc query*(stmt: var Statement): Rows =
+  result = queryPrepared(stmt)
+
+proc fetch*(stmt: var Statement; params: varargs[DbValue, `!?`]): Rows =
+  reset(stmt)
+  bindValues(stmt, params)
+  result = queryPrepared(stmt)
 
 proc close*(rows: var Rows) =
   if rows.handle.inner != nil:
@@ -300,7 +323,7 @@ proc toDbValue*[T](value: Option[T]): DbValue =
   else:
     result = DbValue(kind: dvNull)
 
-template `%!`*(value: untyped): DbValue =
+template `!?`*(value: untyped): DbValue =
   toDbValue(value)
 
 template dbValue*(value: untyped): DbValue =
@@ -309,7 +332,7 @@ template dbValue*(value: untyped): DbValue =
 proc nullValue*(): DbValue =
   DbValue(kind: dvNull)
 
-proc exec*(conn: Connection; sql: string; params: varargs[DbValue, `%!`]): ExecResult =
+proc exec*(conn: Connection; sql: string; params: varargs[DbValue, `!?`]): ExecResult =
   if params.len == 0:
     let batchResult = libsqlConnectionBatch(conn.handle, sql.cstring)
     raiseIfError(batchResult.err)
@@ -317,13 +340,12 @@ proc exec*(conn: Connection; sql: string; params: varargs[DbValue, `%!`]): ExecR
   else:
     var stmt = prepare(conn, sql)
     try:
-      for value in params:
-        bindParam(stmt, value)
+      bindValues(stmt, params)
       result = execute(stmt)
     finally:
       finalize(stmt)
 
-proc exec*(tx: Transaction; sql: string; params: varargs[DbValue, `%!`]): ExecResult =
+proc exec*(tx: Transaction; sql: string; params: varargs[DbValue, `!?`]): ExecResult =
   if params.len == 0:
     let batchResult = libsqlTransactionBatch(tx.handle, sql.cstring)
     raiseIfError(batchResult.err)
@@ -331,18 +353,15 @@ proc exec*(tx: Transaction; sql: string; params: varargs[DbValue, `%!`]): ExecRe
   else:
     var stmt = prepare(tx, sql)
     try:
-      for value in params:
-        bindParam(stmt, value)
+      bindValues(stmt, params)
       result = execute(stmt)
     finally:
       finalize(stmt)
 
-proc query*(conn: Connection; sql: string; params: varargs[DbValue, `%!`]): seq[Row] =
+proc query*(conn: Connection; sql: string; params: varargs[DbValue, `!?`]): seq[Row] =
   var stmt = prepare(conn, sql)
   try:
-    for value in params:
-      bindParam(stmt, value)
-    var rows = query(stmt)
+    var rows = fetch(stmt, params)
     try:
       for row in rows:
         result.add(row)

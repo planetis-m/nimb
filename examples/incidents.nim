@@ -37,14 +37,12 @@ try:
   ]
 
   for incident in seedIncidents:
-    with incidentStmt:
-      reset()
-      bindParam incident[0]
-      bindParam incident[1]
-      bindParam incident[2]
-      bindParam incident[3]
-      bindParam incident[4]
-    discard execute(incidentStmt)
+    discard run(incidentStmt,
+      incident[0],
+      incident[1],
+      incident[2],
+      incident[3],
+      incident[4])
 finally:
   finalize(incidentStmt)
 

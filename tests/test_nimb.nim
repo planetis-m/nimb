@@ -108,11 +108,11 @@ suite "nimb integration":
     var stmt = prepare(conn,
       "INSERT INTO users (name, email_address, age, active) VALUES (?, ?, ?, ?)")
     try:
-      bindParam(stmt, "Manual")
-      bindParam(stmt, "manual@example.com")
-      bindParam(stmt, 12)
-      bindParam(stmt, true)
-      let execResult = execute(stmt)
+      let execResult = run(stmt,
+        "Manual",
+        "manual@example.com",
+        12,
+        true)
       check execResult.rowsChanged == 1
     finally:
       finalize(stmt)

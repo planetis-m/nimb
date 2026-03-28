@@ -134,7 +134,7 @@ template initDropTable*[T](): DropTableQuery =
 proc table*(q: var SelectQuery; name: string) =
   q.fromClause = ident(name)
 
-proc tableExpr*(q: var SelectQuery; sql: string; params: varargs[DbValue, `%!`]) =
+proc tableExpr*(q: var SelectQuery; sql: string; params: varargs[DbValue, `!?`]) =
   q.fromClause = raw(sql, params)
 
 proc tableExpr*(q: var SelectQuery; fragment: SqlFragment) =
@@ -143,19 +143,19 @@ proc tableExpr*(q: var SelectQuery; fragment: SqlFragment) =
 proc table*(q: var InsertQuery; name: string) =
   q.intoClause = ident(name)
 
-proc tableExpr*(q: var InsertQuery; sql: string; params: varargs[DbValue, `%!`]) =
+proc tableExpr*(q: var InsertQuery; sql: string; params: varargs[DbValue, `!?`]) =
   q.intoClause = raw(sql, params)
 
 proc table*(q: var UpdateQuery; name: string) =
   q.tableClause = ident(name)
 
-proc tableExpr*(q: var UpdateQuery; sql: string; params: varargs[DbValue, `%!`]) =
+proc tableExpr*(q: var UpdateQuery; sql: string; params: varargs[DbValue, `!?`]) =
   q.tableClause = raw(sql, params)
 
 proc table*(q: var DeleteQuery; name: string) =
   q.fromClause = ident(name)
 
-proc tableExpr*(q: var DeleteQuery; sql: string; params: varargs[DbValue, `%!`]) =
+proc tableExpr*(q: var DeleteQuery; sql: string; params: varargs[DbValue, `!?`]) =
   q.fromClause = raw(sql, params)
 
 proc tableExpr*(q: var DeleteQuery; fragment: SqlFragment) =
@@ -165,32 +165,32 @@ proc column*(q: var SelectQuery; names: varargs[string]) =
   for name in names:
     q.columns.add(ident(name))
 
-proc columnExpr*(q: var SelectQuery; sql: string; params: varargs[DbValue, `%!`]) =
+proc columnExpr*(q: var SelectQuery; sql: string; params: varargs[DbValue, `!?`]) =
   q.columns.add(raw(sql, params))
 
 proc columnExpr*(q: var SelectQuery; fragment: SqlFragment) =
   q.columns.add(fragment)
 
-proc join*(q: var SelectQuery; sql: string; params: varargs[DbValue, `%!`]) =
+proc join*(q: var SelectQuery; sql: string; params: varargs[DbValue, `!?`]) =
   q.joins.add(raw(sql, params))
 
 proc join*(q: var SelectQuery; fragment: SqlFragment) =
   q.joins.add(fragment)
 
-proc where*(q: var SelectQuery; sql: string; params: varargs[DbValue, `%!`]) =
+proc where*(q: var SelectQuery; sql: string; params: varargs[DbValue, `!?`]) =
   q.whereClauses.add(raw(sql, params))
 
-proc where*(q: var UpdateQuery; sql: string; params: varargs[DbValue, `%!`]) =
+proc where*(q: var UpdateQuery; sql: string; params: varargs[DbValue, `!?`]) =
   q.whereClauses.add(raw(sql, params))
 
-proc where*(q: var DeleteQuery; sql: string; params: varargs[DbValue, `%!`]) =
+proc where*(q: var DeleteQuery; sql: string; params: varargs[DbValue, `!?`]) =
   q.whereClauses.add(raw(sql, params))
 
 proc groupBy*(q: var SelectQuery; expressions: varargs[string]) =
   for expression in expressions:
     q.groupClauses.add(expression)
 
-proc having*(q: var SelectQuery; sql: string; params: varargs[DbValue, `%!`]) =
+proc having*(q: var SelectQuery; sql: string; params: varargs[DbValue, `!?`]) =
   q.havingClauses.add(raw(sql, params))
 
 proc having*(q: var SelectQuery; fragment: SqlFragment) =
@@ -211,7 +211,7 @@ proc column*(q: var InsertQuery; names: varargs[string]) =
   for name in names:
     q.columns.add(quoteIdent(name))
 
-proc values*(q: var InsertQuery; params: varargs[DbValue, `%!`]) =
+proc values*(q: var InsertQuery; params: varargs[DbValue, `!?`]) =
   if q.columns.len > 0 and params.len != q.columns.len:
     raise newException(DbError, "insert values do not match insert columns")
   q.rows.add(@params)
@@ -223,7 +223,7 @@ proc returning*(q: var InsertQuery; expressions: varargs[string]) =
 proc set*(q: var UpdateQuery; columnName: string; value: DbValue) =
   q.setClauses.add(raw(quoteIdent(columnName) & " = ?", value))
 
-proc setExpr*(q: var UpdateQuery; sql: string; params: varargs[DbValue, `%!`]) =
+proc setExpr*(q: var UpdateQuery; sql: string; params: varargs[DbValue, `!?`]) =
   q.setClauses.add(raw(sql, params))
 
 proc returning*(q: var UpdateQuery; expressions: varargs[string]) =
