@@ -1,8 +1,8 @@
 import std/options
 
-import nimb/[db, model, query, sql]
+import nimb/[db, model, query, sql, vector]
 
-export db, model, query, sql
+export db, model, query, sql, vector
 
 proc execRendered(conn: Connection; rendered: RenderedQuery): ExecResult =
   if rendered.params.len == 0:

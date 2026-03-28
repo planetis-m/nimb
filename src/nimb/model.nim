@@ -1,4 +1,4 @@
-import std/[macros, options, sequtils, strutils]
+import std/[macros, options, strutils]
 
 import nimb/db
 
@@ -171,7 +171,10 @@ proc fieldByName*(info: ModelInfo; fieldName: string): FieldInfo =
   raise newException(DbError, "unknown model field: " & fieldName)
 
 proc primaryKeyField*(info: ModelInfo): FieldInfo =
-  let primaryKeys = info.fields.filterIt(it.primaryKey and not it.ignored)
+  var primaryKeys: seq[FieldInfo]
+  for field in info.fields:
+    if field.primaryKey and not field.ignored:
+      primaryKeys.add(field)
   if primaryKeys.len != 1:
     raise newException(DbError, info.typeName &
       " must define exactly one primary key for this operation")

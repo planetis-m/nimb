@@ -1,4 +1,4 @@
-import std/[options, sequtils, strutils]
+import std/[options, strutils]
 
 import nimb/[db, model, sql]
 
@@ -6,7 +6,7 @@ type
   SelectQuery* = object
     modelInfo*: Option[ModelInfo]
     fromClause*: SqlFragment
-    columns*: seq[string]
+    columns*: seq[SqlFragment]
     joins*: seq[SqlFragment]
     whereClauses*: seq[SqlFragment]
     groupClauses*: seq[string]
@@ -47,6 +47,21 @@ proc addParams(target: var seq[DbValue]; fragment: SqlFragment) =
   for param in fragment.params:
     target.add(param)
 
+proc joinFragmentSql(fragments: openArray[SqlFragment]; separator: string): string =
+  for index, fragment in fragments:
+    if index > 0:
+      result.add(separator)
+    result.add(fragment.sql)
+
+proc quotedColumnNames(fields: openArray[FieldInfo]): seq[string] =
+  for field in fields:
+    result.add(quoteIdent(field.columnName))
+
+proc primaryKeyFields(fields: openArray[FieldInfo]): seq[FieldInfo] =
+  for field in fields:
+    if field.primaryKey:
+      result.add(field)
+
 proc initSelectRaw*(): SelectQuery =
   SelectQuery(
     fromClause: raw(""),
@@ -72,7 +87,7 @@ proc initInsert*[T](value: T): InsertQuery =
   result.modelInfo = some(info)
   result.intoClause = ident(info.tableName)
   let fields = insertableFields(info)
-  result.columns = fields.mapIt(quoteIdent(it.columnName))
+  result.columns = quotedColumnNames(fields)
   result.rows = @[toDbValues(value, fields)]
 
 proc initUpdate*[T](value: T): UpdateQuery =
@@ -122,6 +137,9 @@ proc table*(q: var SelectQuery; name: string) =
 proc tableExpr*(q: var SelectQuery; sql: string; params: varargs[DbValue, `%!`]) =
   q.fromClause = raw(sql, params)
 
+proc tableExpr*(q: var SelectQuery; fragment: SqlFragment) =
+  q.fromClause = fragment
+
 proc table*(q: var InsertQuery; name: string) =
   q.intoClause = ident(name)
 
@@ -140,16 +158,24 @@ proc table*(q: var DeleteQuery; name: string) =
 proc tableExpr*(q: var DeleteQuery; sql: string; params: varargs[DbValue, `%!`]) =
   q.fromClause = raw(sql, params)
 
+proc tableExpr*(q: var DeleteQuery; fragment: SqlFragment) =
+  q.fromClause = fragment
+
 proc column*(q: var SelectQuery; names: varargs[string]) =
   for name in names:
-    q.columns.add(quoteIdent(name))
+    q.columns.add(ident(name))
 
 proc columnExpr*(q: var SelectQuery; sql: string; params: varargs[DbValue, `%!`]) =
-  q.columns.add(sql)
-  discard params
+  q.columns.add(raw(sql, params))
+
+proc columnExpr*(q: var SelectQuery; fragment: SqlFragment) =
+  q.columns.add(fragment)
 
 proc join*(q: var SelectQuery; sql: string; params: varargs[DbValue, `%!`]) =
   q.joins.add(raw(sql, params))
+
+proc join*(q: var SelectQuery; fragment: SqlFragment) =
+  q.joins.add(fragment)
 
 proc where*(q: var SelectQuery; sql: string; params: varargs[DbValue, `%!`]) =
   q.whereClauses.add(raw(sql, params))
@@ -166,6 +192,9 @@ proc groupBy*(q: var SelectQuery; expressions: varargs[string]) =
 
 proc having*(q: var SelectQuery; sql: string; params: varargs[DbValue, `%!`]) =
   q.havingClauses.add(raw(sql, params))
+
+proc having*(q: var SelectQuery; fragment: SqlFragment) =
+  q.havingClauses.add(fragment)
 
 proc orderBy*(q: var SelectQuery; expressions: varargs[string]) =
   for expression in expressions:
@@ -214,10 +243,12 @@ proc ifExists*(q: var DropTableQuery) =
 proc render*(q: SelectQuery): RenderedQuery =
   var parts = @["SELECT"]
   if q.columns.len > 0:
-    parts.add(q.columns.join(", "))
+    parts.add(joinFragmentSql(q.columns, ", "))
+    for columnExpr in q.columns:
+      addParams(result.params, columnExpr)
   elif q.modelInfo.isSome:
     let fields = selectableFields(q.modelInfo.get)
-    parts.add(fields.mapIt(quoteIdent(it.columnName)).join(", "))
+    parts.add(quotedColumnNames(fields).join(", "))
   else:
     parts.add("*")
 
@@ -230,7 +261,7 @@ proc render*(q: SelectQuery): RenderedQuery =
     addParams(result.params, joinClause)
 
   if q.whereClauses.len > 0:
-    parts.add("WHERE " & q.whereClauses.mapIt(it.sql).join(" AND "))
+    parts.add("WHERE " & joinFragmentSql(q.whereClauses, " AND "))
     for clause in q.whereClauses:
       addParams(result.params, clause)
 
@@ -238,7 +269,7 @@ proc render*(q: SelectQuery): RenderedQuery =
     parts.add("GROUP BY " & q.groupClauses.join(", "))
 
   if q.havingClauses.len > 0:
-    parts.add("HAVING " & q.havingClauses.mapIt(it.sql).join(" AND "))
+    parts.add("HAVING " & joinFragmentSql(q.havingClauses, " AND "))
     for clause in q.havingClauses:
       addParams(result.params, clause)
 
@@ -284,13 +315,13 @@ proc render*(q: UpdateQuery): RenderedQuery =
     raise newException(DbError, "update query has no SET clauses")
 
   var parts = @["UPDATE", q.tableClause.sql,
-    "SET " & q.setClauses.mapIt(it.sql).join(", ")]
+    "SET " & joinFragmentSql(q.setClauses, ", ")]
   addParams(result.params, q.tableClause)
   for clause in q.setClauses:
     addParams(result.params, clause)
 
   if q.whereClauses.len > 0:
-    parts.add("WHERE " & q.whereClauses.mapIt(it.sql).join(" AND "))
+    parts.add("WHERE " & joinFragmentSql(q.whereClauses, " AND "))
     for clause in q.whereClauses:
       addParams(result.params, clause)
 
@@ -304,7 +335,7 @@ proc render*(q: DeleteQuery): RenderedQuery =
   addParams(result.params, q.fromClause)
 
   if q.whereClauses.len > 0:
-    parts.add("WHERE " & q.whereClauses.mapIt(it.sql).join(" AND "))
+    parts.add("WHERE " & joinFragmentSql(q.whereClauses, " AND "))
     for clause in q.whereClauses:
       addParams(result.params, clause)
 
@@ -315,7 +346,7 @@ proc render*(q: DeleteQuery): RenderedQuery =
 
 proc render*(q: CreateTableQuery): RenderedQuery =
   let fields = selectableFields(q.info)
-  let primaryKeys = fields.filterIt(it.primaryKey)
+  let primaryKeys = primaryKeyFields(fields)
   if primaryKeys.len > 1:
     raise newException(DbError,
       q.info.typeName & " has multiple primary keys, which v1 does not support")

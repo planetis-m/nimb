@@ -83,7 +83,6 @@ with revenueReport:
   groupBy "a.name"
   orderBy "recognized_revenue_cents DESC"
 
-echo ""
 echo "Recognized revenue:"
 for row in rows(conn, revenueReport):
   let revenue = row["recognized_revenue_cents"].getInt

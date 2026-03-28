@@ -35,5 +35,9 @@ proc raw*(sql: string; params: varargs[DbValue, `%!`]): SqlFragment =
 proc ident*(name: string): SqlFragment =
   SqlFragment(sql: quoteIdent(name), params: @[])
 
+proc alias*(fragment: SqlFragment; name: string): SqlFragment =
+  SqlFragment(sql: fragment.sql & " AS " & quoteIdent(name),
+    params: fragment.params)
+
 proc render*(fragment: SqlFragment): RenderedQuery =
   RenderedQuery(sql: fragment.sql, params: fragment.params)
