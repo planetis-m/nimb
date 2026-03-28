@@ -2,13 +2,13 @@ import nimb
 import std/[strformat, with]
 
 type
-  SupportChunkSeed = object
-    docId: string
+  SupportChunk {.dbTable: "support_chunks".} = object
+    docId {.dbColumn: "doc_id".}: string
     product: string
     audience: string
     section: string
     body: string
-    embedding: Vector32
+    embedding {.dbType: "F32_BLOB(4)", dbValueExpr: "vector32(?)".}: Vector32
 
   RetrievalRequest = object
     product: string
@@ -23,28 +23,6 @@ type
     section: string
     body: string
     distance: float64
-
-proc seedSupportChunk(conn: Connection; chunk: SupportChunkSeed) =
-  var stmt = prepare(conn, """
-    INSERT INTO support_chunks (
-      doc_id,
-      product,
-      audience,
-      section,
-      body,
-      embedding
-    ) VALUES (?, ?, ?, ?, ?, vector32(?))
-  """)
-  try:
-    discard run(stmt,
-      chunk.docId,
-      chunk.product,
-      chunk.audience,
-      chunk.section,
-      chunk.body,
-      chunk.embedding)
-  finally:
-    finalize(stmt)
 
 proc nearestChunks(conn: Connection; request: RetrievalRequest;
     limitCount: int): seq[RetrievedChunk] =
@@ -66,7 +44,7 @@ proc nearestChunks(conn: Connection; request: RetrievalRequest;
   result = all[RetrievedChunk](conn, q)
 
 let seeds = [
-  SupportChunkSeed(
+  SupportChunk(
     docId: "billing-guide",
     product: "billing",
     audience: "operators",
@@ -75,7 +53,7 @@ let seeds = [
       "verifying webhook delivery.",
     embedding: vector32([0.96, 0.14, 0.06, 0.02])
   ),
-  SupportChunkSeed(
+  SupportChunk(
     docId: "billing-guide",
     product: "billing",
     audience: "operators",
@@ -84,7 +62,7 @@ let seeds = [
       "the audit trail note.",
     embedding: vector32([0.74, 0.41, 0.09, 0.05])
   ),
-  SupportChunkSeed(
+  SupportChunk(
     docId: "platform-guide",
     product: "database",
     audience: "developers",
@@ -93,7 +71,7 @@ let seeds = [
       "lower tail latency.",
     embedding: vector32([0.91, 0.09, 0.05, 0.01])
   ),
-  SupportChunkSeed(
+  SupportChunk(
     docId: "platform-guide",
     product: "database",
     audience: "developers",
@@ -102,7 +80,7 @@ let seeds = [
       "from application deploys.",
     embedding: vector32([0.12, 0.93, 0.07, 0.02])
   ),
-  SupportChunkSeed(
+  SupportChunk(
     docId: "rag-playbook",
     product: "database",
     audience: "developers",
@@ -111,7 +89,7 @@ let seeds = [
       "returns precise passages instead of entire documents.",
     embedding: vector32([0.88, 0.08, 0.12, 0.04])
   ),
-  SupportChunkSeed(
+  SupportChunk(
     docId: "rag-playbook",
     product: "database",
     audience: "developers",
@@ -132,16 +110,7 @@ let request = RetrievalRequest(
 var db = openDatabase(memoryDatabase())
 var conn = connect(db)
 
-discard exec(conn, &"""
-  CREATE TABLE support_chunks (
-    doc_id TEXT NOT NULL,
-    product TEXT NOT NULL,
-    audience TEXT NOT NULL,
-    section TEXT NOT NULL,
-    body TEXT NOT NULL,
-    embedding {vectorColumnType(4)} NOT NULL
-  )
-""")
+discard exec(conn, initCreateTable[SupportChunk]())
 
 let indexOptions = VectorIndexOptions(
   metric: vmCosine,
@@ -153,7 +122,7 @@ discard createVectorIndex(conn, "support_chunks_embedding_idx",
   "support_chunks", "embedding", indexOptions)
 
 for chunk in seeds:
-  seedSupportChunk(conn, chunk)
+  discard insert(conn, chunk)
 
 echo "Semantic retrieval request:"
 echo &"  product={request.product}"

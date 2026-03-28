@@ -19,7 +19,7 @@ type
     modelInfo*: Option[ModelInfo]
     intoClause*: SqlFragment
     columns*: seq[string]
-    rows*: seq[seq[DbValue]]
+    rows*: seq[seq[SqlFragment]]
     returningClauses*: seq[string]
 
   UpdateQuery* = object
@@ -88,7 +88,11 @@ proc initInsert*[T](value: T): InsertQuery =
   result.intoClause = ident(info.tableName)
   let fields = insertableFields(info)
   result.columns = quotedColumnNames(fields)
-  result.rows = @[toDbValues(value, fields)]
+  let rowValues = toDbValues(value, fields)
+  var row: seq[SqlFragment]
+  for index, field in fields:
+    row.add(raw(field.valueExpr, rowValues[index]))
+  result.rows = @[row]
 
 proc initUpdate*[T](value: T): UpdateQuery =
   let info = modelInfo(T)
@@ -97,7 +101,8 @@ proc initUpdate*[T](value: T): UpdateQuery =
   let updateFields = updateableFields(info)
   let updateValues = toDbValues(value, updateFields)
   for index, field in updateFields:
-    result.setClauses.add(raw(quoteIdent(field.columnName) & " = ?",
+    result.setClauses.add(raw(quoteIdent(field.columnName) & " = " &
+      field.valueExpr,
       updateValues[index]))
   let pkField = primaryKeyField(info)
   let pkValue = toDbValues(value, [pkField])[0]
@@ -214,7 +219,10 @@ proc column*(q: var InsertQuery; names: varargs[string]) =
 proc values*(q: var InsertQuery; params: varargs[DbValue, `!?`]) =
   if q.columns.len > 0 and params.len != q.columns.len:
     raise newException(DbError, "insert values do not match insert columns")
-  q.rows.add(@params)
+  var row: seq[SqlFragment]
+  for value in params:
+    row.add(raw("?", value))
+  q.rows.add(row)
 
 proc returning*(q: var InsertQuery; expressions: varargs[string]) =
   for expression in expressions:
@@ -300,8 +308,8 @@ proc render*(q: InsertQuery): RenderedQuery =
   for row in q.rows:
     var placeholders: seq[string] = @[]
     for value in row:
-      placeholders.add("?")
-      result.params.add(value)
+      placeholders.add(value.sql)
+      addParams(result.params, value)
     rowSql.add("(" & placeholders.join(", ") & ")")
   parts.add(rowSql.join(", "))
 
