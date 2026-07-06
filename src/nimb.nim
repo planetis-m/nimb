@@ -58,8 +58,11 @@ proc rows*(conn: Connection; q: SelectQuery): seq[Row] =
   queryRendered(conn, rendered)
 
 proc all*[T](conn: Connection; q: SelectQuery): seq[T] =
+  var info = modelInfo(T)
+  if q.modelInfo.isSome:
+    info = q.modelInfo.get
   for row in rows(conn, q):
-    result.add(fromRow[T](row))
+    result.add(fromRow[T](row, info))
 
 proc one*[T](conn: Connection; q: SelectQuery): T =
   let values = all[T](conn, q)
@@ -77,18 +80,37 @@ proc insert*[T](conn: Connection; value: T): ExecResult =
   var q = initInsert(value)
   result = exec(conn, q)
 
+proc insert*[T](conn: Connection; model: Model[T]; value: T): ExecResult =
+  var q = initInsert(model, value)
+  result = exec(conn, q)
+
 proc update*[T](conn: Connection; value: T): ExecResult =
   var q = initUpdate(value)
+  result = exec(conn, q)
+
+proc update*[T](conn: Connection; model: Model[T]; value: T): ExecResult =
+  var q = initUpdate(model, value)
   result = exec(conn, q)
 
 proc delete*[T](conn: Connection; value: T): ExecResult =
   var q = initDelete(value)
   result = exec(conn, q)
 
+proc delete*[T](conn: Connection; model: Model[T]; value: T): ExecResult =
+  var q = initDelete(model, value)
+  result = exec(conn, q)
+
 proc getByPk*[T, K](conn: Connection; primaryKey: K): T =
   let info = modelInfo(T)
   let pkField = primaryKeyField(info)
   var q = initSelect[T]()
+  where(q, quoteIdent(pkField.columnName) & " = ?", primaryKey)
+  limit(q, 1)
+  result = one[T](conn, q)
+
+proc getByPk*[T, K](conn: Connection; model: Model[T]; primaryKey: K): T =
+  let pkField = primaryKeyField(model.info)
+  var q = initSelect(model)
   where(q, quoteIdent(pkField.columnName) & " = ?", primaryKey)
   limit(q, 1)
   result = one[T](conn, q)

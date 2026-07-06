@@ -84,11 +84,33 @@ proc initSelect*[T](modelType: typedesc[T]): SelectQuery =
   result.modelInfo = some(info)
   result.fromClause = ident(info.tableName)
 
+proc initSelect*[T](model: Model[T]): SelectQuery =
+  let info = model.info
+  result = SelectQuery(
+    fromClause: raw(""),
+    limitValue: -1,
+    offsetValue: -1
+  )
+  result.modelInfo = some(info)
+  result.fromClause = ident(info.tableName)
+
 template initSelect*[T](): SelectQuery =
   initSelect(T)
 
 proc initInsert*[T](value: T): InsertQuery =
   let info = modelInfo(T)
+  result.modelInfo = some(info)
+  result.intoClause = ident(info.tableName)
+  let fields = insertableFields(info)
+  result.columns = quotedColumnNames(fields)
+  let rowValues = toDbValues(value, fields)
+  var row: seq[SqlFragment]
+  for value in rowValues:
+    row.add(raw("?", value))
+  result.rows = @[row]
+
+proc initInsert*[T](model: Model[T]; value: T): InsertQuery =
+  let info = model.info
   result.modelInfo = some(info)
   result.intoClause = ident(info.tableName)
   let fields = insertableFields(info)
@@ -112,8 +134,29 @@ proc initUpdate*[T](value: T): UpdateQuery =
   let pkValue = toDbValues(value, [pkField])[0]
   result.whereClauses.add(raw(quoteIdent(pkField.columnName) & " = ?", pkValue))
 
+proc initUpdate*[T](model: Model[T]; value: T): UpdateQuery =
+  let info = model.info
+  result.modelInfo = some(info)
+  result.tableClause = ident(info.tableName)
+  let updateFields = updateableFields(info)
+  let updateValues = toDbValues(value, updateFields)
+  for index, field in updateFields:
+    result.setClauses.add(raw(quoteIdent(field.columnName) & " = ?",
+      updateValues[index]))
+  let pkField = primaryKeyField(info)
+  let pkValue = toDbValues(value, [pkField])[0]
+  result.whereClauses.add(raw(quoteIdent(pkField.columnName) & " = ?", pkValue))
+
 proc initDelete*[T](value: T): DeleteQuery =
   let info = modelInfo(T)
+  result.modelInfo = some(info)
+  result.fromClause = ident(info.tableName)
+  let pkField = primaryKeyField(info)
+  let pkValue = toDbValues(value, [pkField])[0]
+  result.whereClauses.add(raw(quoteIdent(pkField.columnName) & " = ?", pkValue))
+
+proc initDelete*[T](model: Model[T]; value: T): DeleteQuery =
+  let info = model.info
   result.modelInfo = some(info)
   result.fromClause = ident(info.tableName)
   let pkField = primaryKeyField(info)
@@ -125,17 +168,27 @@ proc initDelete*[T](modelType: typedesc[T]): DeleteQuery =
   result.modelInfo = some(info)
   result.fromClause = ident(info.tableName)
 
+proc initDelete*[T](model: Model[T]): DeleteQuery =
+  result.modelInfo = some(model.info)
+  result.fromClause = ident(model.info.tableName)
+
 template initDelete*[T](): DeleteQuery =
   initDelete(T)
 
 proc initCreateTable*[T](modelType: typedesc[T]): CreateTableQuery =
   CreateTableQuery(info: modelInfo(modelType))
 
+proc initCreateTable*[T](model: Model[T]): CreateTableQuery =
+  CreateTableQuery(info: model.info)
+
 template initCreateTable*[T](): CreateTableQuery =
   initCreateTable(T)
 
 proc initDropTable*[T](modelType: typedesc[T]): DropTableQuery =
   DropTableQuery(tableName: modelInfo(modelType).tableName)
+
+proc initDropTable*[T](model: Model[T]): DropTableQuery =
+  DropTableQuery(tableName: model.info.tableName)
 
 template initDropTable*[T](): DropTableQuery =
   initDropTable(T)

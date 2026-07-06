@@ -3,12 +3,20 @@ import std/[options, unittest]
 import nimb
 
 type
-  User {.dbTable: "users".} = object
-    id {.dbPk, dbAutoInc.}: int64
+  User = object
+    id: int64
     name: string
-    email {.dbColumn: "email_address".}: string
+    email: string
     age: Option[int]
     active: bool
+
+proc initUserModel(): Model[User] =
+  result = initModel(User)
+  useTable(result, "users")
+  mapField(result, "id", primaryKey = true, autoIncrement = true)
+  mapField(result, "email", columnName = "email_address")
+
+let userModel = initUserModel()
 
 suite "nimb integration":
   var db: Database
@@ -17,27 +25,27 @@ suite "nimb integration":
   setup:
     db = openDatabase(memoryDatabase())
     conn = connect(db)
-    discard exec(conn, initCreateTable[User]())
+    discard exec(conn, initCreateTable(userModel))
 
   teardown:
     close(conn)
     close(db)
 
   test "model metadata":
-    let info = modelInfo(User)
+    let info = userModel.info
     check info.tableName == "users"
     check info.primaryKeyField.columnName == "id"
     check info.fieldByName("email").columnName == "email_address"
 
   test "insert and select with typed mapping":
-    discard insert(conn, User(
+    discard insert(conn, userModel, User(
       name: "Ada",
       email: "ada@example.com",
       age: some(37),
       active: true
     ))
 
-    var q = initSelect[User]()
+    var q = initSelect(userModel)
     where(q, "name = ?", "Ada")
     let user = one[User](conn, q)
 
@@ -47,53 +55,53 @@ suite "nimb integration":
     check user.active
 
   test "get by primary key":
-    let inserted = insert(conn, User(
+    let inserted = insert(conn, userModel, User(
       name: "Grace",
       email: "grace@example.com",
       age: none(int),
       active: false
     ))
 
-    let user = getByPk[User, int64](conn, inserted.lastInsertRowid)
+    let user = getByPk(conn, userModel, inserted.lastInsertRowid)
     check user.name == "Grace"
     check user.age.isNone
 
   test "update by primary key":
-    let inserted = insert(conn, User(
+    let inserted = insert(conn, userModel, User(
       name: "Linus",
       email: "linus@example.com",
       age: some(55),
       active: true
     ))
 
-    let current = getByPk[User, int64](conn, inserted.lastInsertRowid)
+    let current = getByPk(conn, userModel, inserted.lastInsertRowid)
     var updated = current
     updated.name = "Linus T"
     updated.active = false
-    discard update(conn, updated)
+    discard update(conn, userModel, updated)
 
-    let fetched = getByPk[User, int64](conn, inserted.lastInsertRowid)
+    let fetched = getByPk(conn, userModel, inserted.lastInsertRowid)
     check fetched.name == "Linus T"
     check not fetched.active
 
   test "delete by primary key":
-    let inserted = insert(conn, User(
+    let inserted = insert(conn, userModel, User(
       name: "Delete Me",
       email: "delete@example.com",
       age: some(1),
       active: true
     ))
 
-    let current = getByPk[User, int64](conn, inserted.lastInsertRowid)
-    discard delete(conn, current)
+    let current = getByPk(conn, userModel, inserted.lastInsertRowid)
+    discard delete(conn, userModel, current)
 
-    var q = initSelect[User]()
+    var q = initSelect(userModel)
     where(q, "id = ?", inserted.lastInsertRowid)
     let remaining = all[User](conn, q)
     check remaining.len == 0
 
   test "explicit query builder rendering":
-    var q = initSelect[User]()
+    var q = initSelect(userModel)
     column(q, "id", "name")
     where(q, "active = ?", true)
     orderBy(q, "\"id\" DESC")

@@ -17,16 +17,22 @@ type
     embedding: Vector32
 
   RetrievedChunk = object
-    docId {.dbColumn: "doc_id".}: string
+    docId: string
     product: string
     audience: string
     section: string
     body: string
     distance: float64
 
+proc initRetrievedChunkModel(): Model[RetrievedChunk] =
+  result = initModel(RetrievedChunk)
+  mapField(result, "docId", columnName = "doc_id")
+
+let retrievedChunkModel = initRetrievedChunkModel()
+
 proc nearestChunks(conn: Connection; request: RetrievalRequest;
     limitCount: int): seq[RetrievedChunk] =
-  var q = initSelectRaw()
+  var q = initSelect(retrievedChunkModel)
   with q:
     tableExpr vectorTopK("support_chunks_embedding_idx", request.embedding,
       limitCount, "hits")

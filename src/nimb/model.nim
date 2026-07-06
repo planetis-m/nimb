@@ -2,14 +2,6 @@ import std/[macros, options, strutils]
 
 import nimb/db
 
-template dbTable*(name: static string) {.pragma.}
-template dbColumn*(name: static string) {.pragma.}
-template dbPk*() {.pragma.}
-template dbAutoInc*() {.pragma.}
-template dbNull*() {.pragma.}
-template dbDefault*(value: static string) {.pragma.}
-template dbIgnore*() {.pragma.}
-
 type
   FieldInfo* = object
     fieldName*: string
@@ -25,6 +17,9 @@ type
     typeName*: string
     tableName*: string
     fields*: seq[FieldInfo]
+
+  Model*[T] = object
+    info*: ModelInfo
 
 proc snakeCase(text: string): string =
   for index, ch in text:
@@ -49,21 +44,12 @@ proc sqlTypeFor*[T](): string =
   else:
     {.error: "unsupported model field type".}
 
-proc findPragmaArg(pragmas: NimNode; pragmaName: string): NimNode =
-  for pragmaNode in pragmas:
-    if pragmaNode.kind == nnkSym and $pragmaNode == pragmaName:
-      return newLit(true)
-    if pragmaNode.kind in {nnkCall, nnkExprColonExpr} and
-        $pragmaNode[0] == pragmaName:
-      return pragmaNode[1]
-  result = nil
-
 proc unwrapOption(fieldType: NimNode): NimNode =
   if fieldType.kind == nnkBracketExpr and $fieldType[0] == "Option":
     return fieldType[1]
   result = fieldType
 
-macro modelInfo*(T: typedesc): untyped =
+macro defaultModelInfo*(T: typedesc): untyped =
   var target = T
   let typeInst = T.getTypeInst
   if typeInst.kind == nnkBracketExpr and $typeInst[0] == "typeDesc":
@@ -83,18 +69,11 @@ macro modelInfo*(T: typedesc): untyped =
     error("modelInfo only supports object types", T)
 
   var typeName = ""
-  var tableName = ""
   if typePragmaExpr.kind == nnkPragmaExpr:
     typeName = $typePragmaExpr[0]
-    tableName = snakeCase(typeName)
   else:
     typeName = $typePragmaExpr
-    tableName = snakeCase(typeName)
-
-  if typePragmaExpr.kind == nnkPragmaExpr:
-    let pragmaArg = findPragmaArg(typePragmaExpr[1], "dbTable")
-    if pragmaArg != nil:
-      tableName = pragmaArg.strVal
+  let tableName = snakeCase(typeName)
 
   let fieldsNode = newNimNode(nnkBracket)
   let recList = objectTy[2]
@@ -106,10 +85,8 @@ macro modelInfo*(T: typedesc): untyped =
     let fieldType = identDefs[1]
 
     var fieldNameNode = fieldExpr
-    var pragmas: NimNode = nil
     if fieldExpr.kind == nnkPragmaExpr:
       fieldNameNode = fieldExpr[0]
-      pragmas = fieldExpr[1]
 
     var fieldName = $fieldNameNode
     var columnName = snakeCase(fieldName)
@@ -118,18 +95,6 @@ macro modelInfo*(T: typedesc): untyped =
     var nullable = false
     var defaultExpr = ""
     var ignored = false
-
-    if pragmas != nil:
-      let columnPragma = findPragmaArg(pragmas, "dbColumn")
-      if columnPragma != nil:
-        columnName = columnPragma.strVal
-      primaryKey = findPragmaArg(pragmas, "dbPk") != nil
-      autoIncrement = findPragmaArg(pragmas, "dbAutoInc") != nil
-      nullable = findPragmaArg(pragmas, "dbNull") != nil
-      ignored = findPragmaArg(pragmas, "dbIgnore") != nil
-      let defaultPragma = findPragmaArg(pragmas, "dbDefault")
-      if defaultPragma != nil:
-        defaultExpr = defaultPragma.strVal
 
     let unwrappedType = unwrapOption(fieldType)
     if unwrappedType != fieldType:
@@ -164,6 +129,64 @@ macro modelInfo*(T: typedesc): untyped =
       tableName: `tableNameLit`,
       fields: @`fieldsNode`
     )
+
+proc initModel*[T](modelType: typedesc[T]): Model[T] =
+  result.info = defaultModelInfo(modelType)
+
+template initModel*[T](): Model[T] =
+  initModel(T)
+
+template modelInfo*(T: typedesc): ModelInfo =
+  defaultModelInfo(T)
+
+proc modelInfo*[T](model: Model[T]): ModelInfo =
+  result = model.info
+
+proc field*(info: var ModelInfo; fieldName: string): var FieldInfo =
+  for index in 0..<info.fields.len:
+    if info.fields[index].fieldName == fieldName:
+      return info.fields[index]
+  raise newException(DbError, "unknown model field: " & fieldName)
+
+proc field*[T](model: var Model[T]; fieldName: string): var FieldInfo =
+  result = field(model.info, fieldName)
+
+proc useTable*(info: var ModelInfo; tableName: string) =
+  info.tableName = tableName
+
+proc useTable*[T](model: var Model[T]; tableName: string) =
+  useTable(model.info, tableName)
+
+proc fieldIndex(info: ModelInfo; fieldName: string): int =
+  for index in 0..<info.fields.len:
+    if info.fields[index].fieldName == fieldName:
+      return index
+  raise newException(DbError, "unknown model field: " & fieldName)
+
+proc mapField*(info: var ModelInfo; fieldName: string; columnName = "";
+    sqlType = ""; primaryKey = false; autoIncrement = false;
+    nullable = false; defaultExpr = ""; ignored = false) =
+  let index = fieldIndex(info, fieldName)
+  if columnName.len > 0:
+    info.fields[index].columnName = columnName
+  if sqlType.len > 0:
+    info.fields[index].sqlType = sqlType
+  if primaryKey:
+    info.fields[index].primaryKey = true
+  if autoIncrement:
+    info.fields[index].autoIncrement = true
+  if nullable:
+    info.fields[index].nullable = true
+  if defaultExpr.len > 0:
+    info.fields[index].defaultExpr = defaultExpr
+  if ignored:
+    info.fields[index].ignored = true
+
+proc mapField*[T](model: var Model[T]; fieldName: string; columnName = "";
+    sqlType = ""; primaryKey = false; autoIncrement = false;
+    nullable = false; defaultExpr = ""; ignored = false) =
+  mapField(model.info, fieldName, columnName, sqlType, primaryKey,
+    autoIncrement, nullable, defaultExpr, ignored)
 
 proc fieldByName*(info: ModelInfo; fieldName: string): FieldInfo =
   for field in info.fields:
@@ -206,10 +229,12 @@ proc toDbValues*[T](value: T; fields: openArray[FieldInfo]): seq[DbValue] =
     if not matched:
       raise newException(DbError, "missing model field: " & fieldInfo.fieldName)
 
-proc fromRow*[T](row: Row): T =
-  let info = modelInfo(T)
+proc fromRow*[T](row: Row; info: ModelInfo): T =
   result = default(T)
   for modelFieldName, modelFieldValue in fieldPairs(result):
     let fieldInfo = fieldByName(info, modelFieldName)
     if not fieldInfo.ignored and row.hasColumn(fieldInfo.columnName):
       assignDbValue(modelFieldValue, row[fieldInfo.columnName])
+
+proc fromRow*[T](row: Row): T =
+  result = fromRow[T](row, modelInfo(T))

@@ -2,28 +2,44 @@ import nimb
 import std/[strformat, with]
 
 type
-  Service {.dbTable: "services".} = object
-    id {.dbPk, dbAutoInc.}: int64
+  Service = object
+    id: int64
     name: string
     tier: string
     owner: string
 
-  Incident {.dbTable: "incidents".} = object
-    id {.dbPk, dbAutoInc.}: int64
-    serviceId {.dbColumn: "service_id".}: int64
+  Incident = object
+    id: int64
+    serviceId: int64
     summary: string
     severity: string
     status: string
     owner: string
 
+proc initServiceModel(): Model[Service] =
+  result = initModel(Service)
+  useTable(result, "services")
+  mapField(result, "id", primaryKey = true, autoIncrement = true)
+
+proc initIncidentModel(): Model[Incident] =
+  result = initModel(Incident)
+  useTable(result, "incidents")
+  mapField(result, "id", primaryKey = true, autoIncrement = true)
+  mapField(result, "serviceId", columnName = "service_id")
+
+let serviceModel = initServiceModel()
+let incidentModel = initIncidentModel()
+
 var db = openDatabase(memoryDatabase())
 var conn = connect(db)
 
-discard exec(conn, initCreateTable[Service]())
-discard exec(conn, initCreateTable[Incident]())
+discard exec(conn, initCreateTable(serviceModel))
+discard exec(conn, initCreateTable(incidentModel))
 
-discard insert(conn, Service(name: "api-gateway", tier: "critical", owner: "platform"))
-discard insert(conn, Service(name: "search-indexer", tier: "standard", owner: "data"))
+discard insert(conn, serviceModel,
+  Service(name: "api-gateway", tier: "critical", owner: "platform"))
+discard insert(conn, serviceModel,
+  Service(name: "search-indexer", tier: "standard", owner: "data"))
 
 var incidentStmt = prepare(conn, """
   INSERT INTO incidents (service_id, summary, severity, status, owner)
@@ -68,11 +84,11 @@ for row in rows(conn, openCritical):
   let summary = row["summary"].getString
   echo &"  #{id} {serviceName}: {summary}"
 
-var incident = getByPk[Incident, int64](conn, 1)
+var incident = getByPk(conn, incidentModel, 1'i64)
 with incident:
   status = "mitigated"
   owner = "incident-commander"
-discard update(conn, incident)
+discard update(conn, incidentModel, incident)
 
 var rollup = initSelectRaw()
 with rollup:
